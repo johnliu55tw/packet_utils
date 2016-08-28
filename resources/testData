@@ -1,0 +1,35 @@
+# CorrectData
+73 6E 70 80 05 AA BB CC DD EE 06
+# CorrectData
+73 6E 70 81 03 01 02 03 EF
+# Incorrect Header
+74 6E 70 80 05 AA BB CC DD EE 06
+73 6E 71 81 03 01 02 03 EF
+# Incorrect Length Byte
+73 6E 70 81 04 01 02 03 EF
+73 6E 70 80 F0 AA BB CC DD EE 06
+# Missing Payload Bytes
+73 6E 70 80 05 AA BB CC DD 06
+73 6E 70 80 05 BB CC DD EE 06
+73 6E 70 81 03 01 03 EF
+# Adding Payload Bytes
+73 6E 70 80 05 AA BB CC DD EE FF 06
+73 6E 70 81 03 01 02 03 04 05 EF
+# CorrectData
+73 6E 70 80 05 AA BB CC DD EE 06
+# CorrectData
+73 6E 70 81 03 01 02 03 EF
+# Incorrect Checksum
+73 6E 70 80 05 AA BB CC DD EE 07
+73 6E 70 80 05 AA BB CC DD EE 05
+73 6E 70 81 03 01 02 03 F0
+73 6E 70 81 03 01 02 03 FE
+# CorrectData
+73 6E 70 80 05 AA BB CC DD EE 06
+# CorrectData
+73 6E 70 81 03 01 02 03 EF
+# Incorrect Length Byte
+73 6E 70 81 04 01 02 03 EF
+73 6E 70 80 F0 AA BB CC DD EE 06
+# Unfinished data
+73 6E
