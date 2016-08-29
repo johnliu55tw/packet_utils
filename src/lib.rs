@@ -1,3 +1,16 @@
+#[derive(Debug, Copy, Clone)]
+pub enum Endian {
+    Big,
+    Little,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum ChecksumType {
+    XOR{offset: usize},
+    ADD{size: u8, offset: usize, endian: Endian},
+}
+
+/* Transform a vector of u8 into u64 */
 fn buf_to_uint(buf: &[u8], endian: Endian) -> u64 {
     match endian {
         Endian::Big => {
@@ -13,26 +26,21 @@ fn buf_to_uint(buf: &[u8], endian: Endian) -> u64 {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-pub enum Endian {
-    Big,
-    Little,
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum ChecksumType {
-    XOR{offset: usize},
-    ADD{size: u8, offset: usize, endian: Endian},
-}
-
+/* Calculate the checksum from a vector of u8 by XOR method. */
 pub fn checksum_xor(buf: &[u8]) -> u8 {
     buf.iter().fold(0, |acc, &x| acc ^ x)
 }
 
+/* Calculate the checksum from a vector of u8 by summing method.
+ * The size of checksum (bytes) is requried.
+ * */
 pub fn checksum_add(buf: &[u8], size: u8) -> u64 {
     buf.iter().fold(0, |acc: u64, &x| acc + x as u64) & (256u64.pow(size as u32) - 1)
 }
 
+/* Verify if the given vector has valid checksum, which is calculated specified
+ * by the user.
+ */
 pub fn has_valid_checksum(buf: &[u8],
                           chk_type: ChecksumType) -> bool {
     match chk_type {
@@ -47,6 +55,20 @@ pub fn has_valid_checksum(buf: &[u8],
     }
 }
 
+/* Find valiad packet from vector of u8.
+ * Args:
+ *   buf: The buffer.
+ *   header: The header bytes.
+ *   len_idx: The index of the length byte in the packet.
+ *   len_off: the length acquired from len_idx must be the whole length.
+ *            If not, the len_off must be passed and will be added to the length
+ *            acquired from len_idx.
+ *   chk_type: The type of checksum.
+ *
+ * Return:
+ *   valid_packets: A vector of valid packets in &[u8].
+ *   remained_buf: The remaining buffer data
+ */
 pub fn find_valid_packets<'a>(buf: &'a[u8],
                               header: &'a[u8],
                               len_idx: usize,
@@ -61,6 +83,11 @@ pub fn find_valid_packets<'a>(buf: &'a[u8],
     let mut curr_idx: usize = 0;
     let mut buf_iter = buf.iter();
     loop {
+        /* Use the first byte from header to locate the beginning of packet.
+         * Noted that the index returned by position() method if relative to
+         * the current position of the iterator, so add 1 to curr_idx is
+         * required in order to get the correct absolute index.
+         */
         curr_idx += match buf_iter.position(|&x| x == header[0]) {
             None => break,
             Some(idx) => idx,
