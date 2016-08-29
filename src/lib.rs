@@ -13,39 +13,33 @@ fn buf_to_uint(buf: &[u8], endian: Endian) -> u64 {
     }
 }
 
-#[test]
-fn pri_test_bytes_to_uint() {
-    let buf: [u8; 4] = [0xFF, 0xEE, 0x11, 0xDD];
-    assert_eq!(buf_to_uint(&buf, Endian::Big), 0xFFEE11DDu64);
-    assert_eq!(buf_to_uint(&buf, Endian::Little), 0xDD11EEFFu64);
-}
-
+#[derive(Debug, Copy, Clone)]
 pub enum Endian {
     Big,
     Little,
 }
 
+#[derive(Debug, Copy, Clone)]
 pub enum ChecksumType {
-    XOR,
-    ADD{size: u32, endian: Endian},
+    XOR{offset: usize},
+    ADD{size: u8, offset: usize, endian: Endian},
 }
 
 pub fn checksum_xor(buf: &[u8]) -> u8 {
     buf.iter().fold(0, |acc, &x| acc ^ x)
 }
 
-pub fn checksum_add(buf: &[u8], size: u32) -> u64 {
+pub fn checksum_add(buf: &[u8], size: u8) -> u64 {
     buf.iter().fold(0, |acc: u64, &x| acc + x as u64) & (256u64.pow(size as u32) - 1)
 }
 
 pub fn has_valid_checksum(buf: &[u8],
-                          offset: usize,
                           chk_type: ChecksumType) -> bool {
     match chk_type {
-        ChecksumType::XOR => {
+        ChecksumType::XOR{offset} => {
             checksum_xor(&buf[offset..buf.len()-1]) == buf[buf.len()-1]
         },
-        ChecksumType::ADD{size, endian} => {
+        ChecksumType::ADD{size, offset, endian} => {
             let last_idx = buf.len() - size as usize;
             let checksum = checksum_add(&buf[offset..last_idx], size);
             checksum == buf_to_uint(&buf[last_idx..], endian)
@@ -55,14 +49,56 @@ pub fn has_valid_checksum(buf: &[u8],
 
 pub fn find_valid_packets<'a>(buf: &'a[u8],
                               header: &'a[u8],
-                              length_idx: usize,
-                              length_off: usize,
-                              chk_type: ChecksumType) -> Vec<&'a[u8]> {
+                              len_idx: usize,
+                              len_off: usize,
+                              chk_type: ChecksumType)
+        -> (Vec<&'a[u8]>, &'a[u8]) {
 
+    let buf_len = buf.len();
+    let header_len = header.len();
     let mut valid_packets: Vec<&'a[u8]> = Vec::new();
+    let mut remained_buf = buf;
+    let mut curr_idx: usize = 0;
+    let mut buf_iter = buf.iter();
     loop {
+        curr_idx += match buf_iter.position(|&x| x == header[0]) {
+            None => break,
+            Some(idx) => idx,
+        };
 
-    valid_packets
+        if buf_len - curr_idx < header_len {
+            remained_buf = &buf[curr_idx..];
+            break;
+        }
+
+        if !buf[curr_idx..].starts_with(header) {
+            curr_idx += 1;
+            continue;
+        }
+
+        if buf_len - curr_idx < len_idx + 1 {
+            remained_buf = &buf[curr_idx..];
+            break;
+        }
+
+        if buf_len - curr_idx < buf[curr_idx+len_idx] as usize+ len_off {
+            curr_idx += 1;
+            continue;
+        }
+        let packet_len = buf[curr_idx+len_idx] as usize + len_off;
+
+        if !has_valid_checksum(&buf[curr_idx..curr_idx+packet_len], chk_type) {
+            curr_idx += 1;
+            continue;
+        }
+
+        valid_packets.push(&buf[curr_idx..curr_idx+packet_len]);
+        // Review:
+        // Need to find a away to move more than 1
+        curr_idx += 1;
+
+    }
+    (valid_packets, remained_buf)
 }
 
 
@@ -70,18 +106,63 @@ pub fn find_valid_packets<'a>(buf: &'a[u8],
 mod tests {
     extern crate rand;
     extern crate rustc_serialize;
-    use self::std::error::Error;
-    use self::std::io::prelude::*;
-    use self::std::path::Path;
-    use self::rustc_serialize::hex::{ToHex, FromHex};
+    use std::error::Error;
+    use std::io::prelude::*;
+    use std::io::BufReader;
+    use std::fs;
+    use std::path::Path;
+    use self::rustc_serialize::hex::FromHex;
     use super::*;
-
     fn create_random_bytes(size: usize) -> Vec<u8> {
         let mut buf: Vec<u8> = Vec::with_capacity(size);
         for _ in 0..buf.capacity() {
             buf.push(rand::random::<u8>());
         }
         buf
+    }
+
+    fn read_test_data(path: &Path) -> (Vec<u8>, Vec<Vec<u8>>) {
+        let mut raw_data: Vec<u8> = Vec::new();
+        let mut correct_data: Vec<Vec<u8>> = Vec::new();
+        let mut file = match fs::File::open(path) {
+            Err(e) => panic!("could not open {}: {}", path.display(),
+                                                      e.description()),
+            Ok(file) => BufReader::new(file),
+        };
+
+        let mut correct_flag = false;
+        loop {
+            let mut line = String::new();
+            match file.read_line(&mut line) {
+                Err(e) => panic!("could not open {}: {}", path.display(),
+                                                          e.description()),
+                Ok(size) => match size {
+                    0 => break,
+                    size => size,
+                }
+            };
+
+            if line.starts_with("# CorrectData") {
+                correct_flag = true;
+                continue;
+            }
+            else if line.starts_with("#") {
+                correct_flag = false;
+                continue;
+            }
+            else {
+                match correct_flag {
+                    false => {
+                        raw_data.append(&mut line.from_hex().unwrap());
+                    },
+                    true => {
+                        raw_data.append(&mut line.from_hex().unwrap());
+                        correct_data.push(line.from_hex().unwrap());
+                    },
+                }
+            }
+        }
+        (raw_data, correct_data)
     }
 
     #[test]
@@ -113,7 +194,7 @@ mod tests {
             checksum_correct ^= *elem;
         }
         buf.push(checksum_correct);
-        assert!(has_valid_checksum(&buf, 0, ChecksumType::XOR));
+        assert!(has_valid_checksum(&buf, ChecksumType::XOR{offset: 0}));
     }
 
     #[test]
@@ -123,37 +204,32 @@ mod tests {
         buf.push(0x03);
         buf.push(0x6D);
         assert!(has_valid_checksum(&buf,
-                                   0,
-                                   ChecksumType::ADD{size: 2, endian: Endian::Big}));
+                                   ChecksumType::ADD{size: 2,
+                                                     offset: 0,
+                                                     endian: Endian::Big}));
 
         let mut buf: Vec<u8> = vec![0xFF, 0xFE, 0x86, 0x11, 0xD9];
         buf.push(0x6D);
         buf.push(0x03);
         assert!(has_valid_checksum(&buf,
-                                   0,
-                                   ChecksumType::ADD{size: 2, endian: Endian::Little}));
+                                   ChecksumType::ADD{size: 2,
+                                                     offset: 0,
+                                                     endian: Endian::Little}));
     }
 
     #[test]
     fn test_find_valid_packets() {
-        /* Data format index:
-         * Header: 0 ~ 2
-         * Packet Type: 3
-         * Length: 4
-         * Data: 5 ~ Length + 4
-         * Chksum: Length + 5 ~ Length +6
-         */
-        let mut data: Vec<u8> = Vec::new();
-        let header: [u8; 3] = [0x73, 0x61, 0x70];
-        let payload: [u8; 5] = [0xAA, 0xBB, 0xCC, 0xDD, 0xEE];
-        data.extend_from_slice(&header);
-        data.push(0x80);
-        data.push(0x05);
-        data.extend_from_slice(&payload);
-        data.push(0x05);
-        data.push(0xC5);
-        let found = find_valid_packets(&data, &header, 4, 0,
-                        ChecksumType::ADD{size: 2, endian: Endian::Little});
-        assert_eq!(found[0][..], data[..]);
+        let paths = fs::read_dir("./resources/test_data").unwrap();
+        for path in paths {
+            let filepath = path.unwrap().path();
+            let (raw_data, correct_data) = read_test_data(&filepath);
+            let header = "73 6E 70".from_hex().unwrap();
+            let (valid_packets, remained) = find_valid_packets(&raw_data,
+                               &header,
+                               4,
+                               6,
+                               ChecksumType::XOR{offset: 0});
+            assert_eq!(correct_data, valid_packets);
+        }
     }
 }
