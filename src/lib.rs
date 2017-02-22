@@ -10,7 +10,7 @@ pub enum ChecksumType {
     ADD{size: u8, offset: usize, endian: Endian},
 }
 
-/* Transform a vector of u8 into u64 */
+/* Transform a vector of u8 into one u64 value */
 fn buf_to_uint(buf: &[u8], endian: Endian) -> u64 {
     match endian {
         Endian::Big => {

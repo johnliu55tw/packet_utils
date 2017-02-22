@@ -9,7 +9,7 @@ use std::io::BufReader;
 use std::fs;
 use std::path::Path;
 use self::rustc_serialize::hex::FromHex;
-use packet_utils::*; 
+use packet_utils::*;
 
 
 fn create_random_bytes(size: usize) -> Vec<u8> {
