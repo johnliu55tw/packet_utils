@@ -56,74 +56,89 @@ pub fn has_valid_checksum(buf: &[u8],
 }
 
 /* Find valiad packet from vector of u8.
- * Args:
- *   buf: The buffer.
+ * Constructor Args:
  *   header: The header bytes.
  *   len_idx: The index of the length byte in the packet.
- *   len_off: the length acquired from len_idx must be the whole length.
- *            If not, the len_off must be passed and will be added to the length
- *            acquired from len_idx.
+ *   len_off: the length acquired from len_idx must be the total length of one
+ *     packet (including headers, chksums, etc.). If not, the len_off must be
+ *     passed and will be added to the length acquired from len_idx.
  *   chk_type: The type of checksum.
  *
  * Return:
  *   valid_packets: A vector of valid packets in &[u8].
  *   remained_buf: The remaining buffer data
  */
-pub fn find_valid_packets<'a>(buf: &'a[u8],
-                              header: &'a[u8],
-                              len_idx: usize,
-                              len_off: usize,
-                              chk_type: ChecksumType)
-        -> (Vec<&'a[u8]>, &'a[u8]) {
+pub struct PacketParser<'a> {
+    header: &'a[u8],
+    len_idx: usize,
+    len_off: usize,
+    chk_type: ChecksumType
+}
 
-    let buf_len = buf.len();
-    let header_len = header.len();
-    let mut valid_packets: Vec<&'a[u8]> = Vec::new();
-    let mut remained_buf = buf;
-    let mut curr_idx: usize = 0;
-    let mut buf_iter = buf.iter();
-    loop {
-        /* Use the first byte from header to locate the beginning of packet.
-         * Noted that the index returned by position() method if relative to
-         * the current position of the iterator, so add 1 to curr_idx is
-         * required in order to get the correct absolute index.
-         */
-        curr_idx += match buf_iter.position(|&x| x == header[0]) {
-            None => break,
-            Some(idx) => idx,
-        };
+impl<'a> PacketParser<'a> {
 
-        if buf_len - curr_idx < header_len {
-            remained_buf = &buf[curr_idx..];
-            break;
-        }
-
-        if !buf[curr_idx..].starts_with(header) {
-            curr_idx += 1;
-            continue;
-        }
-
-        if buf_len - curr_idx < len_idx + 1 {
-            remained_buf = &buf[curr_idx..];
-            break;
-        }
-
-        if buf_len - curr_idx < buf[curr_idx+len_idx] as usize+ len_off {
-            curr_idx += 1;
-            continue;
-        }
-        let packet_len = buf[curr_idx+len_idx] as usize + len_off;
-
-        if !has_valid_checksum(&buf[curr_idx..curr_idx+packet_len], chk_type) {
-            curr_idx += 1;
-            continue;
-        }
-
-        valid_packets.push(&buf[curr_idx..curr_idx+packet_len]);
-        // Review:
-        // Need to find a away to move more than 1
-        curr_idx += 1;
-
+    pub fn new<'b>(header: &'b[u8],
+                   len_idx: usize,
+                   len_off: usize,
+                   chk_type: ChecksumType) -> PacketParser {
+        PacketParser {
+            header: header,
+            len_idx: len_idx,
+            len_off: len_off,
+            chk_type: chk_type}
     }
-    (valid_packets, remained_buf)
+
+    pub fn parse<'b>(&self, buf: &'b[u8])
+        -> (Vec<&'b[u8]>, &'b[u8]) {
+        let buf_len = buf.len();
+        let header_len = self.header.len();
+        let mut valid_packets: Vec<&'b[u8]> = Vec::new();
+        let mut remained_buf = buf;
+        let mut curr_idx: usize = 0;
+        let mut buf_iter = buf.iter();
+        loop {
+            /* Use the first byte from header to locate the beginning of packet.
+             * Noted that the index returned by position() method if relative to
+             * the current position of the iterator, so add 1 to curr_idx is
+             * required in order to get the correct absolute index.
+             */
+            curr_idx += match buf_iter.position(|&x| x == self.header[0]) {
+                None => break,
+                Some(idx) => idx,
+            };
+
+            if buf_len - curr_idx < header_len {
+                remained_buf = &buf[curr_idx..];
+                break;
+            }
+
+            if !buf[curr_idx..].starts_with(self.header) {
+                curr_idx += 1;
+                continue;
+            }
+
+            if buf_len - curr_idx < self.len_idx + 1 {
+                remained_buf = &buf[curr_idx..];
+                break;
+            }
+
+            if buf_len - curr_idx < buf[curr_idx+self.len_idx] as usize+ self.len_off {
+                curr_idx += 1;
+                continue;
+            }
+            let packet_len = buf[curr_idx+self.len_idx] as usize + self.len_off;
+
+            if !has_valid_checksum(&buf[curr_idx..curr_idx+packet_len], self.chk_type) {
+                curr_idx += 1;
+                continue;
+            }
+
+            valid_packets.push(&buf[curr_idx..curr_idx+packet_len]);
+            // Review:
+            // Need to find a away to move more than 1
+            curr_idx += 1;
+
+        }
+        (valid_packets, remained_buf)
+    }
 }

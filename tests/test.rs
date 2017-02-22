@@ -123,11 +123,12 @@ fn test_find_valid_packets() {
         let filepath = path.unwrap().path();
         let (raw_data, correct_data) = read_test_data(&filepath);
         let header = "73 6E 70".from_hex().unwrap();
-        let (valid_packets, remained) = find_valid_packets(&raw_data,
-                           &header,
-                           4,
-                           6,
-                           ChecksumType::XOR{offset: 0});
+        let parser = PacketParser::new(&header,
+                                       4,
+                                       6,
+                                       ChecksumType::XOR{offset: 0});
+
+        let (valid_packets, remained) = parser.parse(&raw_data);
         assert_eq!(correct_data, valid_packets);
     }
 }
